@@ -1,0 +1,212 @@
+---
+title: "BellaBeat"
+author: "Alaina"
+date: "2/21/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Describe the setting
+
+BellaBeat is a smart device manufacturer who markets fitness trackers to women. The product tracks information such as steps, calaries burned, and more. BellaBeat would like to use their data to market to their target audience.
+
+Key stakeholders are (1) Urška Sršen, the cofounder, and (2) Sando Mur, the mathematician and cofounder of the company. I'm working with the marketing analytics team to help use this data to reach the right people.
+
+## Load Libraries and Data
+
+The zip file has 18 files of data included. Core variables are merged into DailyActivity, and other files have only date and ID plus the variable of interest, such as calories or steps. Some files look at daily information, others at hourly or minute cadence of variables.
+
+I will focus on daily and hourly for the purposes of this analysis. I pull in a few files of interest.
+
+```{r pressure, echo=FALSE}
+#install.packages("tidyverse")
+#install.packages("janitor")
+#install.packages("here")
+#install.packages("skimr")
+library(skimr)
+library(here)
+library(janitor)
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(readr)
+library(lubridate)
+
+activity <- read_csv("Fitabase Data 4.12.16-5.12.16/dailyActivity_merged.csv")
+calories <- read_csv("Fitabase Data 4.12.16-5.12.16/dailyCalories_merged.csv")
+steps <- read_csv("Fitabase Data 4.12.16-5.12.16/dailySteps_merged.csv")
+hourly_steps <- read_csv("Fitabase Data 4.12.16-5.12.16/hourlySteps_merged.csv")
+hourly_calories <- read_csv("Fitabase Data 4.12.16-5.12.16/hourlyCalories_merged.csv")
+#sleep_day <- read.csv("sleepDay_merged.csv")
+
+```
+
+## Review Data Files for Accuracy
+
+Let's collapse daily steps, then merge into the activity data to see how it compares. Data is unique by id and date.
+
+
+
+```{r Step Comparison, echo=FALSE}
+#Reformat Date variable to date
+hourly_steps$ActivityDate<- as_date(mdy_hms(hourly_steps$ActivityHour))
+activity$ActivityDate<- as_date(mdy(activity$ActivityDate))
+
+#Collapse to single date- ID
+deduped_steps <- hourly_steps %>%
+  group_by(ActivityDate, Id) %>%
+  summarize(agg_steps = sum(StepTotal))
+
+#Combine data
+compare <- inner_join(activity, deduped_steps, by = c("Id", "ActivityDate"))
+
+anti_compare <- anti_join(activity, deduped_steps, by = c("Id", "ActivityDate"))
+#There are 6 observations in the activity data that aren't in the hourly data
+
+anti_compare2 <- anti_join(deduped_steps, activity, by = c("Id", "ActivityDate"))
+#There are no observations in the hourly data that aren't in the activity data.
+#Find differences
+
+compare$step_diff <- compare$TotalSteps - compare$agg_steps
+
+ggplot(compare, aes(TotalSteps,agg_steps)) + geom_point()
+```
+
+The activity data isn't perfect. Notably, the steps variable does not perfectly align with the summed steps data from the hourly steps data. 
+
+
+
+```{r Calories Comparison, echo=FALSE}
+#Reformat Date variable to date
+hourly_calories$ActivityDate<- as_date(mdy_hms(hourly_calories$ActivityHour))
+
+#Collapse to single date- ID
+deduped_cal <- hourly_calories %>%
+  group_by(ActivityDate, Id) %>%
+  summarize(agg_calories = sum(Calories))
+
+#Combine data
+compare <- inner_join(activity, deduped_cal, by = c("Id", "ActivityDate"))
+
+anti_compare <- anti_join(activity, deduped_cal, by = c("Id", "ActivityDate"))
+#The same 6 observations in the activity data that aren't in the hourly data
+
+anti_compare2 <- anti_join(deduped_cal, activity, by = c("Id", "ActivityDate"))
+#There are no observations in the hourly data that aren't in the activity data.
+
+#Find differences
+compare$cal_diff <- compare$Calories - compare$agg_calories
+
+ggplot(compare, aes(Calories,agg_calories)) + geom_point()
+```
+Calories also isn't perfect. 
+Let's see if cumulative minutes create a full day.
+
+```{r Minutes of Use, echo=FALSE}
+activity$totMinutes <- activity$VeryActiveMinutes + activity$FairlyActiveMinutes + activity$LightlyActiveMinutes + activity$SedentaryMinutes 
+
+hist(activity$totMinutes,main=title("Daily Minutes of Tracking"),xlab="Minutes")
+
+```
+
+What is the difference between total distance and tracker distance? Let's compare them.
+```{r Distance Comparison}
+ggplot(activity, aes(TotalDistance,TrackerDistance)) + geom_point()
+```
+
+The activity data file has the information pre-compiled for ease of access. But it doesn't perfectly match the individual files. Aggregated values don't perfectly align, and there are a few observations in the aggregated data that don't exist in the simple data. I would need more context on the creation of the data to confirm accuracy between the documents. It is also unclear what units of measure the distance variables are in.
+
+## Process
+
+I've chosen R Studio Cloud for this project because it is useful for notetaking and data manipulation. The data does not have integrity but I will use what I have because there is no background context. From here, I will begin searching for outliers and check for cleanliness.
+
+```{r Review Variable Names}
+#Review metadata
+activity <- read_csv("Fitabase Data 4.12.16-5.12.16/dailyActivity_merged.csv")
+
+skim_without_charts(activity)
+glimpse(activity)
+head(activity)
+activity$ActivityDate<- as_date(mdy(activity$ActivityDate))
+
+#Clean up variable names
+activity$summedMinutes <- activity$VeryActiveMinutes + activity$FairlyActiveMinutes + activity$LightlyActiveMinutes + activity$SedentaryMinutes 
+
+activity <- activity %>%
+  rename_with(tolower)
+activity <- clean_names(activity)
+
+#Add Day of Week Variable
+activity$day <- weekdays(activity$activitydate)
+weekdays1 <- c('Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday')
+activity$wDay <- c('weekend', 'weekday')[(weekdays(activity$activitydate) %in% weekdays1)+1L]
+```
+
+## Plot the activity
+```{r Visualize Steps by Date}
+ggplot(activity, aes(x=activitydate, y=totalsteps)) + geom_point(aes(color=wDay))
+#ggplot(activity, aes(x=activitydate, y=totalsteps)) + geom_point() + facet_wrap(~wDay)
+```
+
+## Analyze
+
+```{r Analyze}
+#Collapse to single day of week observations
+activity$c <- 1
+daily <- activity %>%
+  group_by(activitydate, wDay, day) %>%
+  summarize(avg_steps = mean(totalsteps), avg_activemin = mean(veryactiveminutes), avg_calories = mean(calories), avg_tot_minutes = mean(summedminutes), count = sum(c))
+
+#Scatter average ids by day 
+ggplot(daily, aes(x=activitydate, y=count)) + geom_point(aes(color=wDay))
+
+```
+We are missing data for many Ids in the final week of the data. The final date has only 21 observations, and may be worth dropping. Because the following charts are skewed, we will drop the last day due to sample size issues.
+
+```{r Further filter and analysis}
+daily <- filter(daily, activitydate < "2016-05-12")
+
+#Scatter average steps 
+ggplot(daily, aes(x=activitydate, y=avg_steps)) + geom_point(aes(color=wDay))
+
+#Scatter average calories 
+ggplot(daily, aes(x=activitydate, y=avg_calories)) + geom_point(aes(color=wDay))
+
+#Scatter average highly active minutes 
+ggplot(daily, aes(x=activitydate, y=avg_activemin)) + geom_point(aes(color=wDay))
+
+#Scatter calories with active minutes
+ggplot(daily, aes(x=avg_activemin, y=avg_calories)) + geom_point(aes(color=wDay)) +
+geom_smooth(method=lm)
+
+#Scatter calories with steps
+ggplot(daily, aes(x=avg_steps, y=avg_calories)) + geom_point(aes(color=wDay)) +
+geom_smooth(method=lm)
+
+#Scatter calories with all min worn - wearing it for longer is correlated with higher calories burned
+worn <- filter(daily, avg_tot_minutes > 1000)
+
+ggplot(worn , aes(x=avg_tot_minutes, y=avg_calories)) + geom_point(aes(color=wDay)) +
+geom_smooth(method=lm) 
+```
+
+# Hourly - play with hourly if time remains
+#hourly_steps <- read_csv("Fitabase Data 4.12.16-5.12.16/hourlySteps_merged.csv")
+
+# creating datetime column in the dataframe
+#hourly_steps$datetime <- data.frame(datetime = as.POSIXct(hourly_steps$ActivityHour, format = "%m-%d-%Y %H:%M:%S"))
+ 
+# extracting time
+#data_frame$time <- format(as.POSIXct(
+#  data_frame$datetime),format = "%H:%M:%S")
+  
+#ggplot(hourly_steps, aes(StepTotal,hour)) + geom_point()
+
+
+## Conclusion
+In summary, the data provided isn't fully reliable. I would connect with the data analyst team to understand more about the differences I've seen in the daily and hourly data. It would also be useful to expand the sample size, so dropping individual days with fewer observations would not be an issue. I've found that individuals who wear the tracker longer tend to use more calories. This correlation is not causation. There's not much difference between weekends and weekdays, but this would be more clear over a longer period of time, perhaps spanning all seasons. It would be useful to understand why some users dropped off during the study. 
+
+For some reason, sleep day data was empty, so the analysis cannot study how sleep interacts with an individual's tracker information.
